@@ -2,17 +2,11 @@ class Instance:
     id: int
     featureValues: list
     cancerType: int
-    cancerClass: str
 
     def __init__(self, id, featureValues, cancerType, defaultValueOfInvalidFeature):
         self.id = id
         self.featureValues = featureValues
         self.cancerType = cancerType
-
-        if int(cancerType) == 2:
-            self.cancerClass = 'B'
-        else:
-            self.cancerClass = 'M'
 
         try:
             index = self.featureValues.index('?')
@@ -37,5 +31,3 @@ class Instance:
     def getCancerType(self):
         return self.cancerType
 
-    def getCancerClass(self):
-        return self.cancerClass
