@@ -13,6 +13,15 @@ class Instance:
             self.featureValues[index] = defaultValueOfInvalidFeature
         except ValueError as ve:
             pass
+        try:
+            for x in range(self.featureValues.__len__()):
+                if float(self.featureValues[x]) < 1.0:
+                    print(self.featureValues[x])
+                    self.featureValues[x] = defaultValueOfInvalidFeature
+                    print('AFTER', self.featureValues[x])
+
+        except ValueError as ve:
+            pass
 
     def __str__(self):
         print(self.id, self.featureValues, self.cancerType)
