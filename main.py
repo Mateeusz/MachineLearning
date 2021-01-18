@@ -1,36 +1,29 @@
-import pandas as pd
-from tabulate import tabulate
 import numpy
-from scipy.stats import ks_2samp
 from sklearn import clone
 from sklearn.feature_selection import SelectKBest, f_classif, SelectPercentile, chi2
-from scipy.stats import ttest_ind
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.metrics import accuracy_score, confusion_matrix
-from sklearn.model_selection import cross_val_score, RepeatedKFold, train_test_split
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import RepeatedKFold
 from sklearn.naive_bayes import GaussianNB
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.svm import SVC
-from numpy import mean
-from src.ksType import ksType
+from scipy.stats import rankdata, ranksums
+from tabulate import tabulate
 from src.Instance import Instance
 from ReliefF import ReliefF
 
-#
-datafiles = ['dataR2.csv']
-    # , 'breast-cancer-wisconsin.data', 'dataR2.csv', 'dataset_37_diabetes.csv', 'divorce.csv', 'glass.data', 'haberman.data', 'Immunotherapy.data', 'iris.data',
-    #          'lung-cancer.data','mammographic_masses.data', 'messidor_features.arff', 'php4fATLZ.csv', 'pop_failures.dat', 'sobar-72.csv',
-#          'sonar.all-data', 'SPECT.test', 'SPECT.train',
-    #          'SPECTF.test', 'SPECTF.train', 'wine.data']
-
 # Configuration
-dataFile = 'resources/breast-cancer-wisconsin.data'
+datasets = ['australian', 'balance', 'breastcan', 'breastcancoimbra', 'cryotherapy',
+            'diabetes', 'divorce', 'glass2', 'haberman', 'hayes',
+            'heart', 'Immunotherapy', 'iris', 'liver', 'monkone',
+            'monkthree', 'sobar-72', 'soybean', 'wine', 'wisconsin']
 
 skipRowsWithInvalidFeature = True   # Skip rows with '?' in features
 defaultValueOfInvalidFeature = 1    # Replace '?' with value if skipRowsWithInvalidFeature is False
 
-quantityOfFeatures = 0  # Quantity of features in file
+quantityOfFeatures = 0              # Quantity of features in file
 rkf = RepeatedKFold(n_splits=2, n_repeats=5, random_state=2323)
+
 
 clfs = {
     'kNN' : KNeighborsClassifier(n_neighbors = 5, metric = 'manhattan'),
@@ -39,54 +32,69 @@ clfs = {
     'SVC' : SVC(kernel="linear", C=0.025),
     'RBF_SVMC' : SVC(gamma=2, C=1),
 }
+scores = numpy.zeros((len(clfs), datasets.__len__(), 2 * 5))
 
 
-def main(fileNumber):
-    instances = loadDataFromFile(skipRowsWithInvalidFeature = True, defaultValueOfInvalidFeature = 1, fileNumber=fileNumber)
-    rankingKolmogorov = kBestchi2Test(instances)
-    rankingKBest = kBestANOVATest(instances, quantityOfFeatures)
-    rankingReliefF = reliefFTest(instances)
+def main():
+    for data_id, datafile in enumerate(datasets):
+        instances = loadDataFromFile(skipRowsWithInvalidFeature = True, defaultValueOfInvalidFeature = 1, fileNumber=data_id)
+        selectPercentileRanking = selectPercentileTest(instances)
+        rankingKBest = kBestANOVATest(instances, quantityOfFeatures)
+        rankingReliefF = reliefFTest(instances)
 
-    scores = classification(instances, rankingKBest)
-    kscores = classification(instances, rankingKolmogorov)
-    rscores = classification(instances, rankingReliefF)
+        # scores = classification(instances, rankingKBest)
+        scores = classification(instances, selectPercentileRanking)
+        # scores = classification(instances, rankingReliefF)
+    #
+    numpy.save('kresults', scores)
+    scores = numpy.load('kresults.npy')
+    print(scores.shape)
+    mean_scores = numpy.mean(scores, axis=2).T
+    print("\nMean scores:\n", mean_scores)
 
-    # print(scores)
-    # print(kscores)
-    # print(rscores)
-    finalScores = [scores, kscores, rscores]
-    finalScores = numpy.array(finalScores)
+    ranks = []
+    for ms in mean_scores:
+        ranks.append(rankdata(ms).tolist())
+    ranks = numpy.array(ranks)
+    print("\nRanks:\n", ranks)
 
-    numpy.save('results', finalScores)
-    finalScores = numpy.load('results.npy')
-    # print("Folds:\n", finalScores)
+    mean_ranks = numpy.mean(ranks, axis=0)
+    print("\nMean ranks:\n", mean_ranks)
 
     alfa = .05
-    selectors = ['kBest', 'perCentil', 'ReleifF']
-    for k in range(selectors.__len__()):
-        t_statistic = numpy.ones((len(clfs), len(clfs)))
-        p_value = numpy.ones((len(clfs), len(clfs)))
-        for i in range(len(clfs)):
-            for j in range(len(clfs)):
-                t_statistic[i, j], p_value[i, j] = ttest_ind(finalScores[k][i], finalScores[k][j], equal_var=False, nan_policy='omit')
+    w_statistic = numpy.zeros((len(clfs), len(clfs)))
+    p_value = numpy.zeros((len(clfs), len(clfs)))
 
-        print('=======', selectors[k], '=======')
-        print("t-statistic:\n", t_statistic, "\n\np-value:\n", p_value)
+    for i in range(len(clfs)):
+        for j in range(len(clfs)):
+            w_statistic[i, j], p_value[i, j] = ranksums(ranks.T[i], ranks.T[j])
 
-        headers = ['kNN', 'GNB', 'CART', 'SVC', 'RBF_SVMC']
-        names_column = numpy.array([['kNN'], ['GNB'], ['CART'], ['SVC'], ['RBF_SVMC']])
-        t_statistic_table = numpy.concatenate((names_column, t_statistic), axis=1)
-        t_statistic_table = tabulate(t_statistic_table, headers, floatfmt=".2f")
-        p_value_table = numpy.concatenate((names_column, p_value), axis=1)
-        p_value_table = tabulate(p_value_table, headers, floatfmt=".2f")
-        print("t-statistic:\n", t_statistic_table, "\n\np-value:\n", p_value_table)
 
+    headers = list(clfs.keys())
+    names_column = numpy.expand_dims(numpy.array(list(clfs.keys())), axis=1)
+    w_statistic_table = numpy.concatenate((names_column, w_statistic), axis=1)
+    w_statistic_table = tabulate(w_statistic_table, headers, floatfmt=".2f")
+    p_value_table = numpy.concatenate((names_column, p_value), axis=1)
+    p_value_table = tabulate(p_value_table, headers, floatfmt=".2f")
+    print("\nw-statistic:\n", w_statistic_table, "\n\np-value:\n", p_value_table)
+
+    advantage = numpy.zeros((len(clfs), len(clfs)))
+    advantage[w_statistic > 0] = 1
+    advantage_table = tabulate(numpy.concatenate(
+        (names_column, advantage), axis=1), headers)
+    print("\nAdvantage:\n", advantage_table)
+
+    significance = numpy.zeros((len(clfs), len(clfs)))
+    significance[p_value <= alfa] = 1
+    significance_table = tabulate(numpy.concatenate(
+        (names_column, significance), axis=1), headers)
+    print("\nStatistical significance (alpha = 0.05):\n", significance_table)
 
 
 def loadDataFromFile(skipRowsWithInvalidFeature = False, defaultValueOfInvalidFeature = 1, fileNumber=0):
     instances = []
 
-    fileName = 'resources/'+datafiles[fileNumber]
+    fileName = 'datasets/'+datasets[fileNumber]+'.csv'
     print('CREATING FOR :' + fileName)
     file = open(fileName, 'r').read()
     lines = file.split('\n')
@@ -94,10 +102,10 @@ def loadDataFromFile(skipRowsWithInvalidFeature = False, defaultValueOfInvalidFe
     metadata = lines[0].split(',')
 
     lineLen = int(metadata[0])
-    columnCancerClass = int(metadata[1])  # Index of column with cancer class
-    columnFirstFeature = int(metadata[2])  # Index of column with first feature
+    columnCancerClass = int(metadata[1])    # Index of column with cancer class
+    columnFirstFeature = int(metadata[2])   # Index of column with first feature
     global quantityOfFeatures
-    quantityOfFeatures = int(metadata[3])  # Quantity of features in file
+    quantityOfFeatures = int(metadata[3])   # Quantity of features in file
     amountOfClasses = int(metadata[4])
 
     for line in lines[1:]:
@@ -112,7 +120,7 @@ def loadDataFromFile(skipRowsWithInvalidFeature = False, defaultValueOfInvalidFe
 
     return instances
 
-def kBestANOVATest(instances, quantityOfFeatures):
+def kBestANOVATest(instances, quantityOfFeatures):      #Selector  kBestANOVA
     X_clf = []
     y_clf = []
     for instance in instances:
@@ -126,7 +134,7 @@ def kBestANOVATest(instances, quantityOfFeatures):
     test = SelectKBest(score_func=f_classif, k=quantityOfFeatures)
     return test.fit_transform(X_clf, y_clf)
 
-def kBestchi2Test(instances):
+def selectPercentileTest(instances):                    #Selector PercentileChi2
     X_clf = []
     y_clf = []
     for instance in instances:
@@ -141,7 +149,7 @@ def kBestchi2Test(instances):
 
     return test.fit_transform(X_clf, y_clf)
 
-def reliefFTest(instances):
+def reliefFTest(instances):                              #Selector reliefF
     X_clf = []
     y_clf = []
 
@@ -157,7 +165,6 @@ def reliefFTest(instances):
 
 
 def classification(instances, features):
-    scores = numpy.zeros((len(clfs), 5 * 2))
     X_clf = features
     y_clf = []
 
@@ -177,11 +184,5 @@ def classification(instances, features):
     return scores
 
 
-for fileNumber in range(0, datafiles.__len__()):
-    main(fileNumber)
+main()
 
-
-# TODO:
-# nie ma stanu losowego, repeated key w foldzie wszedzie random ale taki sam
-# https://metsi.github.io/
-# brak merytoryki, brak danych konkretnych
